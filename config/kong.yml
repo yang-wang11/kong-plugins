@@ -1,0 +1,42 @@
+_format_version: "3.0"
+_transform: true
+
+services:
+- name: my-service
+  url: http://my-web-service:80
+
+routes:
+- name: my-route
+  service: my-service
+  paths:
+  - /my-service
+
+plugins:
+- name: myauth
+  service: my-service
+  config:
+    username: admin
+    password: secret
+- name: jwt
+  enabled: true
+  service: my-service
+  config:
+    key_claim_name: iss
+    claims_to_verify:
+    - exp
+# - name: myheader
+
+consumers:
+- username: testuser
+  custom_id: testuserid
+  tags: [test, local]
+  # plugins:
+  # - name: myheader
+
+jwt_secrets:
+- consumer: testuser
+  secret: "e71829c351aa4242c2719cbfbe671c09"
+  algorithm: HS256
+  key: "http://local-issuer.com"
+
+# 去jwt.io生产jwt token
