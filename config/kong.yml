@@ -12,31 +12,37 @@ routes:
   - /my-service
 
 plugins:
-- name: myauth
-  service: my-service
-  config:
-    username: admin
-    password: secret
-- name: jwt
+# - name: myauth
+#   service: my-service
+#   config:
+#     username: admin
+#     password: secret
+- name: hcjwt
   enabled: true
   service: my-service
   config:
     key_claim_name: iss
     claims_to_verify:
     - exp
+    uri_param_names:
+    - token
 # - name: myheader
 
 consumers:
-- username: testuser
-  custom_id: testuserid
-  tags: [test, local]
+- username: jwt-user
+  custom_id: jwt-user-id
+  tags: [test, jwt]
   # plugins:
   # - name: myheader
 
-jwt_secrets:
-- consumer: testuser
+hcjwt_secrets:
+- consumer: jwt-user
   secret: "e71829c351aa4242c2719cbfbe671c09"
   algorithm: HS256
-  key: "http://local-issuer.com"
+  key: http://local-issuer.com
+# - consumer: jwt-user
+#   algorithm: RS256
+#   key: http://local-issuer.com  
+#   rsa_public_key: ""
 
 # 去jwt.io生产jwt token

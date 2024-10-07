@@ -14,7 +14,7 @@
 **运行Nginx容器：**
 
 ```
-docker run -d --name my-web-service -p 8080:80 nginx
+docker run -d --network=kong-net --name my-web-service -p 8080:80 nginx
 ```
 
 这将在本地主机的8080端口运行一个Nginx服务器。

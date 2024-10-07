@@ -1,7 +1,7 @@
 local constants = require "kong.constants"
-local jwt_decoder = require "kong.plugins.myjwt.jwt_parser"
+local jwt_decoder = require "kong.plugins.hcjwt.jwt_parser"
 local kong_meta = require "kong.meta"
-
+local cjson = require "cjson"
 
 local fmt = string.format
 local kong = kong
@@ -13,7 +13,7 @@ local tostring = tostring
 local re_gmatch = ngx.re.gmatch
 
 
-local JwtHandler = {
+local HcJwtHandler = {
   VERSION = kong_meta.version,
   PRIORITY = 1450,
 }
@@ -37,7 +37,6 @@ local function retrieve_tokens(conf)
             token_set[t] = true
           end
         end
-
       elseif token ~= "" then
         token_set[token] = true
       end
@@ -99,7 +98,7 @@ end
 
 
 local function load_credential(jwt_secret_key)
-  local row, err = kong.db.jwt_secrets:select_by_key(jwt_secret_key)
+  local row, err = kong.db.hcjwt_secrets:select_by_key(jwt_secret_key)
   if err then
     return nil, err
   end
@@ -186,16 +185,25 @@ local function do_authentication(conf)
     return false, unauthorized("Invalid '" .. conf.key_claim_name .. "' in claims", www_authenticate_with_error)
   end
 
+  -- TODO: debug info
+  kong.log.info("config setting: ", cjson.encode(conf))
+
   -- Retrieve the secret
-  local jwt_secret_cache_key = kong.db.jwt_secrets:cache_key(jwt_secret_key)
-  local jwt_secret, err      = kong.cache:get(jwt_secret_cache_key, nil,
-                                              load_credential, jwt_secret_key)
+  local jwt_secret_cache_key = kong.db.hcjwt_secrets:cache_key(jwt_secret_key)
+  local jwt_secret, err = kong.cache:get(jwt_secret_cache_key, nil,
+    load_credential, jwt_secret_key)
   if err then
     return error(err)
   end
 
+  -- TODO: debug info
+  kong.log.info("jwt_secret_key: ", jwt_secret_key)
+  kong.log.info("jwt_secret_cache_key: ", jwt_secret_cache_key)
+  kong.log.info("jwt_secret: ", cjson.encode(jwt_secret))
+
   if not jwt_secret then
-    return false, unauthorized("No credentials found for given '" .. conf.key_claim_name .. "'", www_authenticate_with_error)
+    return false,
+        unauthorized("No credentials found for given '" .. conf.key_claim_name .. "'", www_authenticate_with_error)
   end
 
   local algorithm = jwt_secret.algorithm or "HS256"
@@ -206,7 +214,7 @@ local function do_authentication(conf)
   end
 
   local jwt_secret_value = algorithm ~= nil and algorithm:sub(1, 2) == "HS" and
-                           jwt_secret.secret or jwt_secret.rsa_public_key
+      jwt_secret.secret or jwt_secret.rsa_public_key
 
   if conf.secret_is_base64 then
     jwt_secret_value = jwt:base64_decode(jwt_secret_value)
@@ -238,8 +246,7 @@ local function do_authentication(conf)
   -- Retrieve the consumer
   local consumer_cache_key = kong.db.consumers:cache_key(jwt_secret.consumer.id)
   local consumer, err      = kong.cache:get(consumer_cache_key, nil,
-                                            kong.client.load_consumer,
-                                            jwt_secret.consumer.id, true)
+    kong.client.load_consumer, jwt_secret.consumer.id, true)
   if err then
     return error(err)
   end
@@ -261,13 +268,29 @@ end
 local function set_anonymous_consumer(anonymous)
   local consumer_cache_key = kong.db.consumers:cache_key(anonymous)
   local consumer, err = kong.cache:get(consumer_cache_key, nil,
-                                        kong.client.load_consumer,
-                                        anonymous, true)
+    kong.client.load_consumer,
+    anonymous, true)
   if err then
     return error(err)
   end
 
   set_consumer(consumer)
+end
+
+
+--- When conf.anonymous is enabled we are in "logical OR" authentication flow.
+--- Meaning - either anonymous consumer is enabled or there are multiple auth plugins
+--- and we need to passthrough on failed authentication.
+local function logical_OR_authentication(conf)
+  if kong.client.get_credential() then
+    -- we're already authenticated and in "logical OR" between auth methods -- early exit
+    return
+  end
+
+  local ok, _ = do_authentication(conf)
+  if not ok then
+    set_anonymous_consumer(conf.anonymous)
+  end
 end
 
 --- When conf.anonymous is not set we are in "logical AND" authentication flow.
@@ -280,19 +303,21 @@ local function logical_AND_authentication(conf)
   end
 end
 
+function HcJwtHandler:init_worker()
+  kong.log.info("HcJwtHandler initialized in worker.")
+end
 
-function JwtHandler:access(conf)
+function HcJwtHandler:access(conf)
   -- check if preflight request and whether it should be authenticated
   if not conf.run_on_preflight and kong.request.get_method() == "OPTIONS" then
     return
   end
 
   if conf.anonymous then
-    return error("anonymous consumer is not supported")
+    return logical_OR_authentication(conf)
+  else
+    return logical_AND_authentication(conf)
   end
-
-  return logical_AND_authentication(conf)
 end
 
-
-return JwtHandler
+return HcJwtHandler

@@ -3,14 +3,15 @@
 
 export current_dir=$(pwd)
 export plugin_dir=/usr/local/share/lua/5.1/kong/plugins
-export plugin_list="myheader,myauth"
+export plugin_list="hcjwt,myheader,myauth,my-plugin"
 
 docker rm kong-dbless -f
 
 docker run -d --name kong-dbless \
 --network=kong-net \
 -v "$current_dir/config:/kong/declarative" \
--v "$current_dir/plugins:/kong/plugins" \
+-v "$current_dir/kong/plugins:/kong/plugins" \
+-v "$current_dir/config/kong.conf:/etc/kong/kong.conf" \
 -e "KONG_LUA_PACKAGE_PATH=/kong/plugins/?.lua;/kong/plugins/?/init.lua;;" \
 -e "KONG_PLUGINS=bundled,$plugin_list" \
 -e "KONG_DATABASE=off" \
@@ -19,9 +20,10 @@ docker run -d --name kong-dbless \
 -e "KONG_ADMIN_ACCESS_LOG=/dev/stdout" \
 -e "KONG_PROXY_ERROR_LOG=/dev/stderr" \
 -e "KONG_ADMIN_ERROR_LOG=/dev/stderr" \
+-e "KONG_LOG_LEVEL=debug" \
 -e "KONG_ADMIN_LISTEN=0.0.0.0:8001, 0.0.0.0:8444 ssl" \
--e "KONG_ADMIN_GUI_URL=http://localhost:8002" \
 -p 8000:8000 \
+-p 8002:8002 \
 -p 8443:8443 \
 -p 127.0.0.1:8001:8001 \
 -p 127.0.0.1:8444:8444 \
