@@ -7,10 +7,10 @@ export plugin_list="hcjwt,myheader,myauth,my-plugin"
 
 docker rm kong-dbless -f
 
-docker run -d --name kong-dbless \
---network=kong-net \
--v "$current_dir/config:/kong/declarative" \
+# 如果指定容器在一个network下via --network, 那么就会出现DNS name resolution failed的问题
+docker run -d --name kong-dbless --network=kong-net \
 -v "$current_dir/kong/plugins:/kong/plugins" \
+-v "$current_dir/config:/kong/declarative" \
 -v "$current_dir/config/kong.conf:/etc/kong/kong.conf" \
 -e "KONG_LUA_PACKAGE_PATH=/kong/plugins/?.lua;/kong/plugins/?/init.lua;;" \
 -e "KONG_PLUGINS=bundled,$plugin_list" \
@@ -23,8 +23,10 @@ docker run -d --name kong-dbless \
 -e "KONG_LOG_LEVEL=debug" \
 -e "KONG_ADMIN_LISTEN=0.0.0.0:8001, 0.0.0.0:8444 ssl" \
 -p 8000:8000 \
--p 8002:8002 \
 -p 8443:8443 \
+-p 8002:8002 \
 -p 127.0.0.1:8001:8001 \
 -p 127.0.0.1:8444:8444 \
-kong:3.8.0
+dockerio.int.repositories.cloud.sap/kong:3.8.0
+# dockerio.int.repositories.cloud.sap/kong:3.8.0  kong:3.8.0
+# 添加 "KONG_ADMIN_GUI_URL=http://0.0.0.0:8002" 会导致Kong一些信息访问失效

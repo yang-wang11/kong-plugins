@@ -12,6 +12,8 @@ routes:
   - /my-service
 
 plugins:
+- name: myheader
+  service: my-service
 # - name: myauth
 #   service: my-service
 #   config:
@@ -24,16 +26,14 @@ plugins:
     key_claim_name: iss
     claims_to_verify:
     - exp
-    uri_param_names:
-    - token
-# - name: myheader
+    # uri_param_names:
+    # - token
+
 
 consumers:
 - username: jwt-user
   custom_id: jwt-user-id
   tags: [test, jwt]
-  # plugins:
-  # - name: myheader
 
 hcjwt_secrets:
 - consumer: jwt-user
@@ -45,4 +45,4 @@ hcjwt_secrets:
 #   key: http://local-issuer.com  
 #   rsa_public_key: ""
 
-# 去jwt.io生产jwt token
+# create a new jwt token via jwt.io

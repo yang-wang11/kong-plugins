@@ -184,9 +184,10 @@ https://hub.docker.com/r/pantsel/konga/#installation
 
 ```
 docker pull pantsel/konga
-docker run -d --name konga --network kong-net -p 1337:1337 \
-           -e "NODE_ENV=development" \
-           -e "TOKEN_SECRET=abc123" \
+docker run -d --name konga --network kong-net \
+        -p 1337:1337 \
+        -e "NODE_ENV=development" \
+        -e "TOKEN_SECRET=abc123" \
            pantsel/konga
 ```
 

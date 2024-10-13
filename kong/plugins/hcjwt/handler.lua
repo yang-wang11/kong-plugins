@@ -151,6 +151,9 @@ end
 
 
 local function do_authentication(conf)
+
+  ngx.log(ngx.DEBUG, "config: " .. cjson.encode(conf))
+
   local token, err = retrieve_tokens(conf)
   if err then
     return error(err)
@@ -185,26 +188,20 @@ local function do_authentication(conf)
     return false, unauthorized("Invalid '" .. conf.key_claim_name .. "' in claims", www_authenticate_with_error)
   end
 
-  -- TODO: debug info
-  kong.log.info("config setting: ", cjson.encode(conf))
+  ngx.log(ngx.DEBUG, "jwt_secret_key: " .. jwt_secret_key)  -- http://local-issuer.com
 
-  -- Retrieve the secret
   local jwt_secret_cache_key = kong.db.hcjwt_secrets:cache_key(jwt_secret_key)
-  local jwt_secret, err = kong.cache:get(jwt_secret_cache_key, nil,
-    load_credential, jwt_secret_key)
+  ngx.log(ngx.DEBUG, "jwt_secret_cache_key: " .. jwt_secret_cache_key) -- hcjwt_secrets:http://local-issuer.com:::::0dc6f45b-8f8d-40d2-a504-473544ee190b
+
+  local jwt_secret, err = kong.cache:get(jwt_secret_cache_key, nil, load_credential, jwt_secret_key)
   if err then
     return error(err)
   end
-
-  -- TODO: debug info
-  kong.log.info("jwt_secret_key: ", jwt_secret_key)
-  kong.log.info("jwt_secret_cache_key: ", jwt_secret_cache_key)
-  kong.log.info("jwt_secret: ", cjson.encode(jwt_secret))
-
   if not jwt_secret then
     return false,
         unauthorized("No credentials found for given '" .. conf.key_claim_name .. "'", www_authenticate_with_error)
   end
+  ngx.log(ngx.DEBUG, "jwt_secret: " .. cjson.encode(jwt_secret))
 
   local algorithm = jwt_secret.algorithm or "HS256"
 
@@ -213,8 +210,7 @@ local function do_authentication(conf)
     return false, unauthorized("Invalid algorithm", www_authenticate_with_error)
   end
 
-  local jwt_secret_value = algorithm ~= nil and algorithm:sub(1, 2) == "HS" and
-      jwt_secret.secret or jwt_secret.rsa_public_key
+  local jwt_secret_value = algorithm ~= nil and algorithm:sub(1, 2) == "HS" and jwt_secret.secret or jwt_secret.rsa_public_key
 
   if conf.secret_is_base64 then
     jwt_secret_value = jwt:base64_decode(jwt_secret_value)
@@ -245,8 +241,7 @@ local function do_authentication(conf)
 
   -- Retrieve the consumer
   local consumer_cache_key = kong.db.consumers:cache_key(jwt_secret.consumer.id)
-  local consumer, err      = kong.cache:get(consumer_cache_key, nil,
-    kong.client.load_consumer, jwt_secret.consumer.id, true)
+  local consumer, err      = kong.cache:get(consumer_cache_key, nil, kong.client.load_consumer, jwt_secret.consumer.id, true)
   if err then
     return error(err)
   end
