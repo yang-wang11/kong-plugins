@@ -27,6 +27,7 @@ docker run -d --name kong-dbless --network=kong-net \
 -p 8002:8002 \
 -p 127.0.0.1:8001:8001 \
 -p 127.0.0.1:8444:8444 \
-dockerio.int.repositories.cloud.sap/kong:3.8.0
+kong-gateway_my-plugin:3.8-0.0.1
+# hanaservice-dev.common.repositories.cloud.sap/com.sap.hana.cloud.cloudinfrastructure/hana-cloud-api-gateway:i321482-dev
 # dockerio.int.repositories.cloud.sap/kong:3.8.0  kong:3.8.0
 # 添加 "KONG_ADMIN_GUI_URL=http://0.0.0.0:8002" 会导致Kong一些信息访问失效

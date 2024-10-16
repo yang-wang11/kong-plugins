@@ -23,7 +23,7 @@ return {
       { id = typedefs.uuid },
       { created_at = typedefs.auto_timestamp_s },
       { consumer = { type = "foreign", reference = "consumers", required = true, on_delete = "cascade", }, },
-      { key = { type = "string", required = false, unique = true, auto = true }, },
+      { key = { type = "string", required = false, auto = true, unique = true }, },
       { secret = { type = "string", auto = true }, },
       { rsa_public_key = { type = "string" }, },
       { algorithm = {

@@ -105,6 +105,16 @@ local function load_credential(jwt_secret_key)
   return row
 end
 
+local function load_credentials(jwt_secret_key)
+  local secrets = {}
+  local secret, err = kong.db.hcjwt_secrets:select_by_key(jwt_secret_key)
+    if err then
+      kong.log.err("load_credentials - error: " .. err)
+    end
+    table.insert(secrets, secret)
+    return secrets, nil
+end
+
 
 local function set_consumer(consumer, credential, token)
   kong.client.authenticate(consumer, credential)
@@ -152,8 +162,6 @@ end
 
 local function do_authentication(conf)
 
-  ngx.log(ngx.DEBUG, "config: " .. cjson.encode(conf))
-
   local token, err = retrieve_tokens(conf)
   if err then
     return error(err)
@@ -188,75 +196,91 @@ local function do_authentication(conf)
     return false, unauthorized("Invalid '" .. conf.key_claim_name .. "' in claims", www_authenticate_with_error)
   end
 
-  ngx.log(ngx.DEBUG, "jwt_secret_key: " .. jwt_secret_key)  -- http://local-issuer.com
+  -- ngx.log(ngx.DEBUG, "jwt_secret_key: " .. jwt_secret_key)
+  kong.log.debug("jwt_secret_key: " .. jwt_secret_key)  -- http://local-issuer.com
 
   local jwt_secret_cache_key = kong.db.hcjwt_secrets:cache_key(jwt_secret_key)
-  ngx.log(ngx.DEBUG, "jwt_secret_cache_key: " .. jwt_secret_cache_key) -- hcjwt_secrets:http://local-issuer.com:::::0dc6f45b-8f8d-40d2-a504-473544ee190b
+  -- ngx.log(ngx.DEBUG, "jwt_secret_cache_key: " .. jwt_secret_cache_key) -- hcjwt_secrets:http://local-issuer.com:::::0dc6f45b-8f8d-40d2-a504-473544ee190b
+  kong.log.debug("jwt_secret_cache_key: " .. jwt_secret_cache_key)
 
-  local jwt_secret, err = kong.cache:get(jwt_secret_cache_key, nil, load_credential, jwt_secret_key)
+  local jwt_secrets, err = kong.cache:get(jwt_secret_cache_key, nil, load_credentials, jwt_secret_key)
   if err then
     return error(err)
   end
-  if not jwt_secret then
-    return false,
-        unauthorized("No credentials found for given '" .. conf.key_claim_name .. "'", www_authenticate_with_error)
-  end
-  ngx.log(ngx.DEBUG, "jwt_secret: " .. cjson.encode(jwt_secret))
 
-  local algorithm = jwt_secret.algorithm or "HS256"
-
-  -- Verify "alg"
-  if jwt.header.alg ~= algorithm then
-    return false, unauthorized("Invalid algorithm", www_authenticate_with_error)
+  kong.log.debug("the result of jwt_secrets: " .. cjson.encode(jwt_secrets))
+  if not jwt_secrets or #jwt_secrets == 0 then
+    return false, unauthorized("No credentials found for given '" .. conf.key_claim_name .. "'", www_authenticate_with_error)
   end
 
-  local jwt_secret_value = algorithm ~= nil and algorithm:sub(1, 2) == "HS" and jwt_secret.secret or jwt_secret.rsa_public_key
+  local jwt_result = true
+  local jwt_status = {}
+  for _, jwt_secret in ipairs(jwt_secrets) do
+    -- ngx.log(ngx.DEBUG, "jwt_secret: " .. cjson.encode(jwt_secret))
+    kong.log.debug("jwt_secret: " .. cjson.encode(jwt_secret))
 
-  if conf.secret_is_base64 then
-    jwt_secret_value = jwt:base64_decode(jwt_secret_value)
-  end
+    local algorithm = jwt_secret.algorithm or "HS256"
 
-  if not jwt_secret_value then
-    return false, unauthorized("Invalid key/secret", www_authenticate_with_error)
-  end
-
-  -- Now verify the JWT signature
-  if not jwt:verify_signature(jwt_secret_value) then
-    return false, unauthorized("Invalid signature", www_authenticate_with_error)
-  end
-
-  -- Verify the JWT registered claims
-  local ok_claims, errors = jwt:verify_registered_claims(conf.claims_to_verify)
-  if not ok_claims then
-    return false, unauthorized(nil, www_authenticate_with_error, errors)
-  end
-
-  -- Verify the JWT registered claims
-  if conf.maximum_expiration ~= nil and conf.maximum_expiration > 0 then
-    local ok, errors = jwt:check_maximum_expiration(conf.maximum_expiration)
-    if not ok then
-      return false, unauthorized(nil, www_authenticate_with_error, errors)
+    -- Verify "alg"
+    if jwt.header.alg ~= algorithm then
+      jwt_result, jwt_status = false, unauthorized("Invalid algorithm", www_authenticate_with_error)
+      goto continue
     end
+
+    local jwt_secret_value = algorithm ~= nil and algorithm:sub(1, 2) == "HS" and jwt_secret.secret or jwt_secret.rsa_public_key
+
+    if conf.secret_is_base64 then
+      jwt_secret_value = jwt:base64_decode(jwt_secret_value)
+    end
+
+    if not jwt_secret_value then
+      jwt_result, jwt_status = false, unauthorized("Invalid key/secret", www_authenticate_with_error)
+      goto continue
+    end
+
+    -- Now verify the JWT signature
+    if not jwt:verify_signature(jwt_secret_value) then
+      jwt_result, jwt_status = false, unauthorized("Invalid signature", www_authenticate_with_error)
+      goto continue
+    end
+
+    -- Verify the JWT registered claims
+    local ok_claims, errors = jwt:verify_registered_claims(conf.claims_to_verify)
+    if not ok_claims then
+      jwt_result, jwt_status = false, unauthorized(nil, www_authenticate_with_error, errors)
+      goto continue
+    end
+
+    -- Verify the JWT registered claims
+    if conf.maximum_expiration ~= nil and conf.maximum_expiration > 0 then
+      local ok, errors = jwt:check_maximum_expiration(conf.maximum_expiration)
+      if not ok then
+        jwt_result, jwt_status = false, unauthorized(nil, www_authenticate_with_error, errors)
+        goto continue
+      end
+    end
+
+    -- Retrieve the consumer
+    local consumer_cache_key = kong.db.consumers:cache_key(jwt_secret.consumer.id)
+    local consumer, err      = kong.cache:get(consumer_cache_key, nil, kong.client.load_consumer, jwt_secret.consumer.id, true)
+    if err then
+      return error(err)
+    end
+
+    -- However this should not happen
+    if not consumer then
+      jwt_result, jwt_status = false, { status = 401, message = fmt("Could not find consumer for '%s=%s'", conf.key_claim_name, jwt_secret_key)
+      }
+    end
+
+    set_consumer(consumer, jwt_secret, token)
+
+    if jwt_result then
+      return jwt_result, jwt_status
+    end
+
+    ::continue::
   end
-
-  -- Retrieve the consumer
-  local consumer_cache_key = kong.db.consumers:cache_key(jwt_secret.consumer.id)
-  local consumer, err      = kong.cache:get(consumer_cache_key, nil, kong.client.load_consumer, jwt_secret.consumer.id, true)
-  if err then
-    return error(err)
-  end
-
-  -- However this should not happen
-  if not consumer then
-    return false, {
-      status = 401,
-      message = fmt("Could not find consumer for '%s=%s'", conf.key_claim_name, jwt_secret_key)
-    }
-  end
-
-  set_consumer(consumer, jwt_secret, token)
-
-  return true
 end
 
 
